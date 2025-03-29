@@ -99,7 +99,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     groups, users, blocked = await get_stats()
     bot_name = f"[Emiko Bot](https://t.me/{context.bot.username})"
     stats_text = f"""
-**{bot_name} Combined Stats (Emiko + AnonXMusic):**
+**{bot_name} Combined Stat:**
 **📛 Blocked Users:** `{blocked}`
 **👥 Groups:** `{groups}`
 **👤 Users:** `{users}`
