@@ -1,7 +1,9 @@
+from telegram.ext import filters
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegram.ext import (
     Application,
     CommandHandler,
+    MessageHandler,
     ContextTypes,
     filters,
     CallbackQueryHandler
