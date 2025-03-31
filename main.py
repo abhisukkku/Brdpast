@@ -58,24 +58,55 @@ async def get_anon_stats():
 # ==================== COMMANDS ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    log_msg = (
+        f"🆕 New User Started Bot\n"
+        f"• ID: <code>{user.id}</code>\n"
+        f"• Username: @{user.username}\n"
+        f"• Name: {user.full_name}"
+    )
+    await send_log(context, log_msg)
+
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Join", url="https://t.me/Hanime_Japan"),
-            InlineKeyboardButton("Join", url="https://t.me/Anime_Samurais")
+            InlineKeyboardButton("Join Channel", url="https://t.me/YourChannel"),
+            InlineKeyboardButton("Support", url="https://t.me/YourSupport")
         ],
         [
-            InlineKeyboardButton("Join", url="https://t.me/FinishedAnimeList"),
-            InlineKeyboardButton("Join", url="https://t.me/Hanimee_Lovers")
+            InlineKeyboardButton("Updates", url="https://t.me/YourUpdates"),
+            InlineKeyboardButton("Developer", url="https://t.me/YourDeveloper")
         ]
     ])
     
     await context.bot.send_photo(
         chat_id=update.effective_chat.id,
         photo=START_IMAGE_URL,
-        caption="✨ **Welcome to Mikasa File Sharing Bot! 📁✨** \n\nEasily upload, store, and share your files with just a tap",
+        caption="🌸 **AnonXMusic Broadcast System** 🌸\n\nJoin our channels for updates!",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
+
+async def group_join_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle bot being added to a group"""
+    chat = update.effective_chat
+    user = update.effective_user
+    
+    log_msg = (
+        f"👥 Bot Added to New Group\n"
+        f"• Group ID: <code>{chat.id}</code>\n"
+        f"• Group Name: {chat.title}\n"
+        f"• Added by: @{user.username} (<code>{user.id}</code>)"
+    )
+    
+    await send_log(context, log_msg)
+    
+    # Add group to database
+    if not await chats_col.find_one({"chat_id": chat.id}):
+        await chats_col.insert_one({
+            "chat_id": chat.id,
+            "title": chat.title,
+            "type": "group"
+        })
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
@@ -84,7 +115,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     groups, users, blocked = await get_anon_stats()
     stats_text = (
-        f"📊 **MikasaXFile Database Stats**\n\n"
+        f"📊 **AnonXMusic Database Stats**\n\n"
         f"• 👥 Groups: `{groups}`\n"
         f"• 👤 Users: `{users}`\n"
         f"• 🚫 Blocked: `{blocked}`"
@@ -165,14 +196,21 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(report, parse_mode="Markdown")
 
 # ==================== MAIN ====================
-
 def main():
     app = Application.builder().token(os.environ.get("TOKEN")).build()
     
+    # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("broadcast", broadcast))
     
+    # Group join handler
+    app.add_handler(MessageHandler(
+        filters.StatusUpdate.NEW_CHAT_MEMBERS, 
+        group_join_handler
+    ))
+    
+    # Webhook setup
     PORT = int(os.environ.get("PORT", 10000))
     app.run_webhook(
         listen="0.0.0.0",
