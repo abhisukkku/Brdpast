@@ -46,14 +46,20 @@ async def get_anon_stats():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
-        [InlineKeyboardButton("❌ Close", callback_data="close")]
+        [
+            InlineKeyboardButton("Join", url="https://t.me/YourChannel"),
+            InlineKeyboardButton("Join", url="https://t.me/YourSupport")
+        ],
+        [
+            InlineKeyboardButton("Join", url="https://t.me/YourUpdates"),
+            InlineKeyboardButton("Join", url="https://t.me/YourDeveloper")
+        ]
     ])
     
     await context.bot.send_photo(
         chat_id=update.effective_chat.id,
         photo=START_IMAGE_URL,
-        caption="Welcome to Mikasa File Sharing Bot! 📁",
+        caption="🌸 **AnonXMusic Broadcast System** 🌸\n\nJoin our channels for updates!",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
@@ -65,7 +71,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     groups, users, blocked = await get_anon_stats()
     stats_text = (
-        f"📊 **mikasa Database Stats**\n\n"
+        f"📊 **MikasaXFile Database Stats**\n\n"
         f"• 👥 Groups: `{groups}`\n"
         f"• 👤 Users: `{users}`\n"
         f"• 🚫 Blocked: `{blocked}`"
@@ -93,10 +99,15 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     failed_users = 0
 
     progress_msg = await update.message.reply_text("🔄 Broadcast Started...")
+    msg_to_broadcast = update.message.reply_to_message
 
     for index, chat_id in enumerate(targets, 1):
         try:
-            await update.message.reply_to_message.copy(chat_id)
+            # Check if message is forwarded
+            if msg_to_broadcast.forward_from_chat or msg_to_broadcast.forward_from:
+                await msg_to_broadcast.forward(chat_id=chat_id)
+            else:
+                await msg_to_broadcast.copy(chat_id=chat_id)
             
             # Check if group or user
             if chat_id < 0:
@@ -127,7 +138,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Final report
     report = (
-        f"📣 **mikasa Broadcast Report**\n\n"
+        f"📣 **MikasaXFile Broadcast Report**\n\n"
         f"• Total Targets: {total}\n"
         f"• ✅ Success: {success_groups + success_users}\n"
         f"  - Groups: {success_groups}\n"
