@@ -69,19 +69,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Join Channel", url="https://t.me/YourChannel"),
-            InlineKeyboardButton("Support", url="https://t.me/YourSupport")
+            InlineKeyboardButton("Join", url="https://t.me/Hanime_Japan"),
+            InlineKeyboardButton("Join", url="https://t.me/Anime_Samurais")
         ],
         [
-            InlineKeyboardButton("Updates", url="https://t.me/YourUpdates"),
-            InlineKeyboardButton("Developer", url="https://t.me/YourDeveloper")
+            InlineKeyboardButton("Join", url="https://t.me/FinishedAnimeList"),
+            InlineKeyboardButton("Join", url="https://t.me/Hanimee_Lovers")
         ]
     ])
     
     await context.bot.send_photo(
         chat_id=update.effective_chat.id,
         photo=START_IMAGE_URL,
-        caption="🌸 **AnonXMusic Broadcast System** 🌸\n\nJoin our channels for updates!",
+        caption=" **Welcome to Mikasa File Sharing Bot! 📁✨** \n\nEasily upload, store, and share your files with just a tap! 🚀",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
@@ -115,7 +115,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     groups, users, blocked = await get_anon_stats()
     stats_text = (
-        f"📊 **AnonXMusic Database Stats**\n\n"
+        f"📊 **MikasaXFile Database Stats**\n\n"
         f"• 👥 Groups: `{groups}`\n"
         f"• 👤 Users: `{users}`\n"
         f"• 🚫 Blocked: `{blocked}`"
