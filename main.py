@@ -53,7 +53,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_photo(
         chat_id=update.effective_chat.id,
         photo=START_IMAGE_URL,
-        caption="🌸 **AnonXMusic Broadcast Bot** 🌸\n\nOnly works with AnonXMusic database!",
+        caption="Welcome to Mikasa File Sharing Bot! 📁",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
