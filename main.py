@@ -65,7 +65,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     groups, users, blocked = await get_anon_stats()
     stats_text = (
-        f"📊 **AnonXMusic Database Stats**\n\n"
+        f"📊 **mikasa Database Stats**\n\n"
         f"• 👥 Groups: `{groups}`\n"
         f"• 👤 Users: `{users}`\n"
         f"• 🚫 Blocked: `{blocked}`"
@@ -127,7 +127,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Final report
     report = (
-        f"📣 **AnonXMusic Broadcast Report**\n\n"
+        f"📣 **mikasa Broadcast Report**\n\n"
         f"• Total Targets: {total}\n"
         f"• ✅ Success: {success_groups + success_users}\n"
         f"  - Groups: {success_groups}\n"
