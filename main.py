@@ -12,47 +12,37 @@ import pymongo
 
 # MongoDB Setup
 MONGODB_URI = os.environ.get("MONGODB_URI")
-LOGGER_GROUP = int(os.environ.get("LOGGER_GROUP"))
 START_IMAGE_URL = os.environ.get("START_IMAGE_URL")
 ADMIN_ID = int(os.environ.get("ADMIN_ID"))
 
+# AnonXMusic Database Connection
 client = pymongo.MongoClient(MONGODB_URI)
-
-# Databases
-db_emiko = client["EmikoBotDB"]
-db_anon = client["Anon"]
+db = client["Anon"]
 
 # Collections
-emiko_chats = db_emiko["chats"]
-emiko_blocked = db_emiko["blocked"]
-anon_chats = db_anon["chats"]
-anon_users = db_anon["tgusersdb"]
-anon_blocked = db_anon["blockedusers"]
+chats_col = db["chats"]         # Groups (chat_id < 0)
+users_col = db["tgusersdb"]     # Users (user_id > 0)
+blocked_col = db["blockedusers"] 
 
 # ==================== HELPER FUNCTIONS ====================
 
 def is_owner(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
-async def get_combined_stats():
-    # Emiko Stats
-    emiko_groups = emiko_chats.count_documents({"type": "group"})
-    emiko_users = emiko_chats.count_documents({"type": "private"})
-    
-    # Anon Stats
-    anon_groups = anon_chats.count_documents({"chat_id": {"$lt": 0}})
-    anon_users_count = anon_users.count_documents({"user_id": {"$gt": 0}})
-    
-    # Blocked Stats
-    total_blocked = emiko_blocked.count_documents({}) + anon_blocked.count_documents({})
-    
-    return (
-        emiko_groups + anon_groups,
-        emiko_users + anon_users_count,
-        total_blocked
-    )
+async def fetch_anon_data():
+    """Fetch all groups and users from Anon's database"""
+    groups = [chat["chat_id"] for chat in chats_col.find({"chat_id": {"$lt": 0}})]
+    users = [user["user_id"] for user in users_col.find({"user_id": {"$gt": 0}})]
+    return list(set(groups + users))  # Remove duplicates
 
-# ==================== COMMAND HANDLERS ====================
+async def get_anon_stats():
+    """Get statistics from Anon's database"""
+    groups = chats_col.count_documents({"chat_id": {"$lt": 0}})
+    users = users_col.count_documents({"user_id": {"$gt": 0}})
+    blocked = blocked_col.count_documents({})
+    return groups, users, blocked
+
+# ==================== COMMANDS ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
@@ -63,104 +53,102 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_photo(
         chat_id=update.effective_chat.id,
         photo=START_IMAGE_URL,
-        caption="🌸 **Hii~ I'ᴍ Emiko!** 🌸\n\nYour ultimate group manager bot!",
+        caption="🌸 **AnonXMusic Broadcast Bot** 🌸\n\nOnly works with AnonXMusic database!",
         reply_markup=keyboard,
         parse_mode="Markdown"
     )
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
-        await update.message.reply_text("🚫 Access Denied!")
+        await update.message.reply_text("🚫 Permission Denied!")
         return
     
-    groups, users, blocked = await get_combined_stats()
-    stats_msg = (
-        f"📊 **loda Bot Statistics**\n\n"
-        f"• 🚫 Blocked Users: `{blocked}`\n"
-        f"• 👥 Groups Managed: `{groups}`\n"
-        f"• 👤 Total Users: `{users}`"
+    groups, users, blocked = await get_anon_stats()
+    stats_text = (
+        f"📊 **AnonXMusic Database Stats**\n\n"
+        f"• 👥 Groups: `{groups}`\n"
+        f"• 👤 Users: `{users}`\n"
+        f"• 🚫 Blocked: `{blocked}`"
     )
-    await update.message.reply_text(stats_msg, parse_mode="Markdown")
+    await update.message.reply_text(stats_text, parse_mode="Markdown")
+
+# ==================== BROADCAST SYSTEM ====================
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
-        await update.message.reply_text("❌ Administrator Only!")
+        await update.message.reply_text("❌ Owner Only Command!")
         return
 
     if not update.message.reply_to_message:
-        await update.message.reply_text("🔍 Please reply to a message to broadcast!")
+        await update.message.reply_text("❗ Reply to a message to broadcast!")
         return
 
-    # Collect all chat IDs
-    all_chats = []
+    # Fetch all targets
+    targets = await fetch_anon_data()
+    total = len(targets)
     
-    # From Emiko
-    for chat in emiko_chats.find():
-        all_chats.append(chat["chat_id"])
-    
-    # From AnonXMusic
-    for group in anon_chats.find({"chat_id": {"$lt": 0}}):
-        all_chats.append(group["chat_id"])
-    for user in anon_users.find({"user_id": {"$gt": 0}}):
-        all_chats.append(user["user_id"])
-    
-    unique_chats = list(set(all_chats))
-    total = len(unique_chats)
-    success = 0
-    failed = 0
+    success_groups = 0
+    success_users = 0
+    failed_groups = 0
+    failed_users = 0
 
-    progress_msg = await update.message.reply_text(
-        f"📤 Broadcasting started...\n0/{total} sent",
-        parse_mode="Markdown"
-    )
+    progress_msg = await update.message.reply_text("🔄 Broadcast Started...")
 
-    for index, chat_id in enumerate(unique_chats, 1):
+    for index, chat_id in enumerate(targets, 1):
         try:
             await update.message.reply_to_message.copy(chat_id)
-            success += 1
+            
+            # Check if group or user
+            if chat_id < 0:
+                success_groups += 1
+            else:
+                success_users += 1
+                
         except Exception as e:
-            print(f"Failed to send to {chat_id}: {e}")
-            failed += 1
-            # Update both blocked collections
-            emiko_blocked.update_one(
+            print(f"Failed to send to {chat_id}: {str(e)}")
+            # Update blocked collection
+            blocked_col.update_one(
                 {"chat_id": chat_id},
                 {"$set": {"chat_id": chat_id}},
                 upsert=True
             )
-            anon_blocked.update_one(
-                {"chat_id": chat_id},
-                {"$set": {"chat_id": chat_id}},
-                upsert=True
-            )
+            if chat_id < 0:
+                failed_groups += 1
+            else:
+                failed_users += 1
         
-        # Update progress every 20 messages
-        if index % 20 == 0:
+        # Update progress every 15 messages
+        if index % 15 == 0:
             await progress_msg.edit_text(
-                f"⏳ Progress: {index}/{total}\n✅ Success: {success}\n❌ Failed: {failed}"
+                f"⏳ Progress: {index}/{total}\n"
+                f"✅ Groups: {success_groups} | Users: {success_users}\n"
+                f"❌ Failed G: {failed_groups} | U: {failed_users}"
             )
 
     # Final report
-    report_msg = (
-        f"📣 **Broadcast Complete**\n\n"
-        f"• Total Targets: `{total}`\n"
-        f"• ✅ Success: `{success}`\n"
-        f"• ❌ Failed: `{failed}`"
+    report = (
+        f"📣 **AnonXMusic Broadcast Report**\n\n"
+        f"• Total Targets: {total}\n"
+        f"• ✅ Success: {success_groups + success_users}\n"
+        f"  - Groups: {success_groups}\n"
+        f"  - Users: {success_users}\n"
+        f"• ❌ Failed: {failed_groups + failed_users}\n"
+        f"  - Groups: {failed_groups}\n"
+        f"  - Users: {failed_users}"
     )
     
     await progress_msg.delete()
-    await update.message.reply_text(report_msg, parse_mode="Markdown")
+    await update.message.reply_text(report, parse_mode="Markdown")
 
 # ==================== MAIN ====================
 
 def main():
     app = Application.builder().token(os.environ.get("TOKEN")).build()
     
-    # Command Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("broadcast", broadcast))
     
-    # Webhook Setup
     PORT = int(os.environ.get("PORT", 10000))
     app.run_webhook(
         listen="0.0.0.0",
