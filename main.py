@@ -123,7 +123,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(stats_text, parse_mode="Markdown")
 
 # ==================== BROADCAST SYSTEM ====================
-
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
         await update.message.reply_text("❌ Owner Only Command!")
@@ -147,38 +146,69 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for index, chat_id in enumerate(targets, 1):
         try:
-            # Check if message is forwarded
-            if msg_to_broadcast.forward_from_chat or msg_to_broadcast.forward_from:
+            # Check if bot is admin in groups
+            if chat_id < 0:
+                try:
+                    chat_member = await context.bot.get_chat_member(chat_id, context.bot.id)
+                    if chat_member.status not in ["administrator", "creator"]:
+                        raise Exception("Not admin in group")
+                except Exception as e:
+                    print(f"Admin check failed for {chat_id}: {str(e)}")
+                    failed_groups += 1
+                    continue
+
+            # Forwarding logic improvement
+            if msg_to_broadcast.forward_from_chat:
+                # For channel forwards
                 await msg_to_broadcast.forward(chat_id=chat_id)
+            elif msg_to_broadcast.forward_from:
+                # For user forwards
+                await msg_to_broadcast.copy(chat_id=chat_id)
             else:
+                # Normal message
                 await msg_to_broadcast.copy(chat_id=chat_id)
             
-            # Check if group or user
+            # Update success counts
             if chat_id < 0:
                 success_groups += 1
             else:
                 success_users += 1
                 
         except Exception as e:
-            print(f"Failed to send to {chat_id}: {str(e)}")
-            # Update blocked collection
-            blocked_col.update_one(
-                {"chat_id": chat_id},
-                {"$set": {"chat_id": chat_id}},
-                upsert=True
-            )
+            error_msg = f"Failed to send to {chat_id}: {str(e)}"
+            print(error_msg)
+            
+            # Special handling for flood waits
+            if "FloodWait" in str(e):
+                flood_time = int(str(e).split()[-1])
+                await asyncio.sleep(flood_time)
+                continue
+                
+            # Update blocked list only for critical errors
+            if "Forbidden" in str(e) or "Unauthorized" in str(e):
+                blocked_col.update_one(
+                    {"chat_id": chat_id},
+                    {"$set": {"chat_id": chat_id}},
+                    upsert=True
+                )
+            
+            # Update failure counts
             if chat_id < 0:
                 failed_groups += 1
             else:
                 failed_users += 1
         
-        # Update progress every 15 messages
-        if index % 15 == 0:
-            await progress_msg.edit_text(
-                f"⏳ Progress: {index}/{total}\n"
-                f"✅ Groups: {success_groups} | Users: {success_users}\n"
-                f"❌ Failed G: {failed_groups} | U: {failed_users}"
-            )
+        # Update progress every 10 messages with slower rate
+        if index % 10 == 0:
+            try:
+                await progress_msg.edit_text(
+                    f"⏳ Progress: {index}/{total}\n"
+                    f"✅ Groups: {success_groups} | Users: {success_users}\n"
+                    f"❌ Failed G: {failed_groups} | U: {failed_users}"
+                )
+                await asyncio.sleep(1)  # Add small delay to avoid flooding
+            except Exception as e:
+                print(f"Progress update failed: {str(e)}")
 
     # Final report
     report = (
@@ -192,7 +222,11 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"  - Users: {failed_users}"
     )
     
-    await progress_msg.delete()
+    try:
+        await progress_msg.delete()
+    except Exception as e:
+        print(f"Failed to delete progress message: {str(e)}")
+    
     await update.message.reply_text(report, parse_mode="Markdown")
 
 # ==================== MAIN ====================
