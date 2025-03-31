@@ -51,8 +51,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("Join", url="https://t.me/Anime_Samurais")
         ],
         [
-            InlineKeyboardButton("Join", url="https://t.me/YourUpdates"),
-            InlineKeyboardButton("Join", url="https://t.me/YourDeveloper")
+            InlineKeyboardButton("Join", url="https://t.me/FinishedAnimeList"),
+            InlineKeyboardButton("Join", url="https://t.me/Hanimee_Lovers")
         ]
     ])
     
