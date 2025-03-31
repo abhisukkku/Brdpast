@@ -9,11 +9,13 @@ from telegram.ext import (
 )
 import os
 import pymongo
+from datetime import datetime
 
 # MongoDB Setup
 MONGODB_URI = os.environ.get("MONGODB_URI")
 START_IMAGE_URL = os.environ.get("START_IMAGE_URL")
 ADMIN_ID = int(os.environ.get("ADMIN_ID"))
+LOGGER_GROUP = int(os.environ.get("LOGGER_GROUP"))  # Log channel ID
 
 # AnonXMusic Database Connection
 client = pymongo.MongoClient(MONGODB_URI)
@@ -23,6 +25,17 @@ db = client["Anon"]
 chats_col = db["chats"]         # Groups (chat_id < 0)
 users_col = db["tgusersdb"]     # Users (user_id > 0)
 blocked_col = db["blockedusers"] 
+
+async def send_log(context: ContextTypes.DEFAULT_TYPE, log_data: str):
+    """Send logs to logger channel"""
+    try:
+        await context.bot.send_message(
+            chat_id=LOGGER_GROUP,
+            text=f"📝 #{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n{log_data}",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        print(f"Logging Error: {e}")
 
 # ==================== HELPER FUNCTIONS ====================
 
