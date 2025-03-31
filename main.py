@@ -47,8 +47,8 @@ async def get_anon_stats():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("Join", url="https://t.me/YourChannel"),
-            InlineKeyboardButton("Join", url="https://t.me/YourSupport")
+            InlineKeyboardButton("Join", url="https://t.me/Hanime_Japan"),
+            InlineKeyboardButton("Join", url="https://t.me/Anime_Samurais")
         ],
         [
             InlineKeyboardButton("Join", url="https://t.me/YourUpdates"),
