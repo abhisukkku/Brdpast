@@ -143,7 +143,75 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(error_msg)
         await update.message.reply_text(error_msg)
 
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update.effective_user.id):
+        await update.message.reply_text("🚫 Permission Denied!")
+        return
+    
+    groups, users, blocked = await get_anon_stats()
+    stats_text = (
+        f"📊 **MikasaXFile Database Stats**\n\n"
+        f"• 👥 Groups: `{groups}`\n"
+        f"• 👤 Users: `{users}`\n"
+        f"• 🚫 Blocked: `{blocked}`"
+    )
+    await update.message.reply_text(stats_text, parse_mode="Markdown")
 
+async def group_join_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    user = update.effective_user
+    
+    log_msg = (
+        f"👥 Bot Added to New Group\n"
+        f"• Group ID: <code>{chat.id}</code>\n"
+        f"• Group Name: {chat.title}\n"
+        f"• Added by: @{user.username} (<code>{user.id}</code>)"
+    )
+    
+    await send_log(context, log_msg)
+    
+    existing = await chats_col.find_one({"chat_id": chat.id})
+    if not existing:
+        await chats_col.insert_one({
+            "chat_id": chat.id,
+            "title": chat.title,
+            "type": "group"
+        })
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    log_msg = (
+        f"🆕 New User Started Bot\n"
+        f"• ID: <code>{user.id}</code>\n"
+        f"• Username: @{user.username}\n"
+        f"• Name: {user.full_name}"
+    )
+    await send_log(context, log_msg)
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Join", url="https://t.me/Hanime_Japan"),
+            InlineKeyboardButton("Join", url="https://t.me/Anime_Samurais")
+        ],
+        [
+            InlineKeyboardButton("Join", url="https://t.me/FinishedAnimeList"),
+            InlineKeyboardButton("Join", url="https://t.me/Hanimee_Lover")
+        ]
+    ])
+    
+    await context.bot.send_photo(
+        chat_id=update.effective_chat.id,
+        photo=START_IMAGE_URL,
+        caption=" **Welcome to Mikasa File Sharing Bot! 📁✨** \n\nEasily upload, store, and share your files with just a tap! 🚀",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+async def get_anon_stats():
+    groups = await chats_col.count_documents({"chat_id": {"$lt": 0}})
+    users = await users_col.count_documents({"user_id": {"$gt": 0}})
+    blocked = await blocked_col.count_documents({})
+    return groups, users, blocked
 
 def main():
     app = Application.builder().token(os.environ.get("TOKEN")).build()
