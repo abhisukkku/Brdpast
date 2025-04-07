@@ -7,27 +7,25 @@ from telegram.ext import (
     ContextTypes,
     CallbackQueryHandler
 )
+from telegram.error import RetryAfter, Forbidden, BadRequest
 import os
 import pymongo
+import asyncio
 from datetime import datetime
 
 # MongoDB Setup
 MONGODB_URI = os.environ.get("MONGODB_URI")
 START_IMAGE_URL = os.environ.get("START_IMAGE_URL")
 ADMIN_ID = int(os.environ.get("ADMIN_ID"))
-LOGGER_GROUP = int(os.environ.get("LOGGER_GROUP"))  # Log channel ID
+LOGGER_GROUP = int(os.environ.get("LOGGER_GROUP"))
 
-# AnonXMusic Database Connection
 client = pymongo.MongoClient(MONGODB_URI)
 db = client["Anon"]
-
-# Collections
-chats_col = db["chats"]         # Groups (chat_id < 0)
-users_col = db["tgusersdb"]     # Users (user_id > 0)
-blocked_col = db["blockedusers"] 
+chats_col = db["chats"]
+users_col = db["tgusersdb"]
+blocked_col = db["blockedusers"]
 
 async def send_log(context: ContextTypes.DEFAULT_TYPE, log_data: str):
-    """Send logs to logger channel"""
     try:
         await context.bot.send_message(
             chat_id=LOGGER_GROUP,
@@ -37,25 +35,38 @@ async def send_log(context: ContextTypes.DEFAULT_TYPE, log_data: str):
     except Exception as e:
         print(f"Logging Error: {e}")
 
-# ==================== HELPER FUNCTIONS ====================
-
 def is_owner(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
-async def fetch_anon_data():
-    """Fetch all groups and users from Anon's database"""
-    groups = [chat["chat_id"] for chat in chats_col.find({"chat_id": {"$lt": 0}})]
-    users = [user["user_id"] for user in users_col.find({"user_id": {"$gt": 0}})]
-    return list(set(groups + users))  # Remove duplicates
+async def fetch_valid_targets(context):
+    valid_targets = []
+    
+    # Validate groups
+    async for group in chats_col.find({"chat_id": {"$lt": 0}}):
+        try:
+            chat = await context.bot.get_chat(group["chat_id"])
+            if chat.type in ["group", "supergroup"]:
+                valid_targets.append(group["chat_id"])
+        except Exception as e:
+            print(f"Removing invalid group {group['chat_id']}: {e}")
+            await chats_col.delete_one({"_id": group["_id"]})
+
+    # Validate users
+    async for user in users_col.find({"user_id": {"$gt": 0}}):
+        try:
+            await context.bot.get_chat(user["user_id"])
+            valid_targets.append(user["user_id"])
+        except Exception as e:
+            print(f"Removing invalid user {user['user_id']}: {e}")
+            await users_col.delete_one({"_id": user["_id"]})
+
+    return valid_targets
 
 async def get_anon_stats():
-    """Get statistics from Anon's database"""
-    groups = chats_col.count_documents({"chat_id": {"$lt": 0}})
-    users = users_col.count_documents({"user_id": {"$gt": 0}})
-    blocked = blocked_col.count_documents({})
+    groups = await chats_col.count_documents({"chat_id": {"$lt": 0}})
+    users = await users_col.count_documents({"user_id": {"$gt": 0}})
+    blocked = await blocked_col.count_documents({})
     return groups, users, blocked
-
-# ==================== COMMANDS ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -87,7 +98,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def group_join_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle bot being added to a group"""
     chat = update.effective_chat
     user = update.effective_user
     
@@ -100,7 +110,6 @@ async def group_join_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await send_log(context, log_msg)
     
-    # Add group to database
     if not await chats_col.find_one({"chat_id": chat.id}):
         await chats_col.insert_one({
             "chat_id": chat.id,
@@ -122,7 +131,6 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(stats_text, parse_mode="Markdown")
 
-# ==================== BROADCAST SYSTEM ====================
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update.effective_user.id):
         await update.message.reply_text("❌ Owner Only Command!")
@@ -132,119 +140,96 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❗ Reply to a message to broadcast!")
         return
 
-    # Fetch all targets
-    targets = await fetch_anon_data()
+    targets = await fetch_valid_targets(context)
     total = len(targets)
-    
-    success_groups = 0
-    success_users = 0
-    failed_groups = 0
-    failed_users = 0
-
-    progress_msg = await update.message.reply_text("🔄 Broadcast Started...")
     msg_to_broadcast = update.message.reply_to_message
+    
+    success_g = success_u = failed_g = failed_u = 0
+    progress_msg = await update.message.reply_text("🔄 Broadcast Started...")
 
     for index, chat_id in enumerate(targets, 1):
         try:
-            # Check if bot is admin in groups
             if chat_id < 0:
                 try:
-                    chat_member = await context.bot.get_chat_member(chat_id, context.bot.id)
-                    if chat_member.status not in ["administrator", "creator"]:
-                        raise Exception("Not admin in group")
+                    member = await context.bot.get_chat_member(chat_id, context.bot.id)
+                    if member.status not in ["administrator", "creator"]:
+                        failed_g +=1
+                        continue
                 except Exception as e:
-                    print(f"Admin check failed for {chat_id}: {str(e)}")
-                    failed_groups += 1
+                    failed_g +=1
                     continue
 
-            # Forwarding logic improvement
-            if msg_to_broadcast.forward_from_chat:
-                # For channel forwards
-                await msg_to_broadcast.forward(chat_id=chat_id)
-            elif msg_to_broadcast.forward_from:
-                # For user forwards
-                await msg_to_broadcast.copy(chat_id=chat_id)
-            else:
-                # Normal message
-                await msg_to_broadcast.copy(chat_id=chat_id)
+            await msg_to_broadcast.copy(chat_id=chat_id)
             
-            # Update success counts
-            if chat_id < 0:
-                success_groups += 1
-            else:
-                success_users += 1
-                
+            if chat_id < 0: success_g +=1
+            else: success_u +=1
+
+        except RetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+            try:
+                await msg_to_broadcast.copy(chat_id=chat_id)
+                if chat_id < 0: success_g +=1
+                else: success_u +=1
+            except:
+                if chat_id < 0: failed_g +=1
+                else: failed_u +=1
+
+        except Forbidden:
+            await blocked_col.update_one(
+                {"chat_id": chat_id},
+                {"$set": {"chat_id": chat_id}},
+                upsert=True
+            )
+            if chat_id < 0: failed_g +=1
+            else: failed_u +=1
+
+        except BadRequest as e:
+            if "Chat not found" in str(e):
+                if chat_id <0: await chats_col.delete_one({"chat_id": chat_id})
+                else: await users_col.delete_one({"user_id": chat_id})
+            if chat_id <0: failed_g +=1
+            else: failed_u +=1
+
         except Exception as e:
-            error_msg = f"Failed to send to {chat_id}: {str(e)}"
-            print(error_msg)
-            
-            # Special handling for flood waits
-            if "FloodWait" in str(e):
-                flood_time = int(str(e).split()[-1])
-                await asyncio.sleep(flood_time)
-                continue
-                
-            # Update blocked list only for critical errors
-            if "Forbidden" in str(e) or "Unauthorized" in str(e):
-                blocked_col.update_one(
-                    {"chat_id": chat_id},
-                    {"$set": {"chat_id": chat_id}},
-                    upsert=True
-                )
-            
-            # Update failure counts
-            if chat_id < 0:
-                failed_groups += 1
-            else:
-                failed_users += 1
-        
-        # Update progress every 10 messages with slower rate
-        if index % 10 == 0:
+            print(f"Error in {chat_id}: {str(e)}")
+            if chat_id <0: failed_g +=1
+            else: failed_u +=1
+
+        if index % 5 == 0:
             try:
                 await progress_msg.edit_text(
                     f"⏳ Progress: {index}/{total}\n"
-                    f"✅ Groups: {success_groups} | Users: {success_users}\n"
-                    f"❌ Failed G: {failed_groups} | U: {failed_users}"
+                    f"✅ Groups: {success_g} | Users: {success_u}\n"
+                    f"❌ Failed G: {failed_g} | U: {failed_u}"
                 )
-                await asyncio.sleep(1)  # Add small delay to avoid flooding
-            except Exception as e:
-                print(f"Progress update failed: {str(e)}")
+                await asyncio.sleep(0.3)
+            except:
+                pass
 
-    # Final report
-    report = (
-        f"📣 **MikasaXFile Broadcast Report**\n\n"
-        f"• Total Targets: {total}\n"
-        f"• ✅ Success: {success_groups + success_users}\n"
-        f"  - Groups: {success_groups}\n"
-        f"  - Users: {success_users}\n"
-        f"• ❌ Failed: {failed_groups + failed_users}\n"
-        f"  - Groups: {failed_groups}\n"
-        f"  - Users: {failed_users}"
-    )
-    
     try:
         await progress_msg.delete()
-    except Exception as e:
-        print(f"Failed to delete progress message: {str(e)}")
-    
+    except:
+        pass
+
+    report = (
+        f"📣 **Broadcast Report**\n\n"
+        f"• Total Targets: `{total}`\n"
+        f"• Success Rate: `{(success_g+success_u)/total*100:.2f}%`\n"
+        f"✅ Success: `{success_g+success_u}`\n"
+        f"  - Groups: `{success_g}` | Users: `{success_u}`\n"
+        f"❌ Failed: `{failed_g+failed_u}`\n"
+        f"  - Groups: `{failed_g}` | Users: `{failed_u}`"
+    )
     await update.message.reply_text(report, parse_mode="Markdown")
 
-# ==================== MAIN ====================
 def main():
     app = Application.builder().token(os.environ.get("TOKEN")).build()
     
-    # Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, group_join_handler))
     
-    # Group join handler
-    app.add_handler(MessageHandler(
-        filters.StatusUpdate.NEW_CHAT_MEMBERS, 
-        group_join_handler
-    ))
-    
-    # Webhook setup
     PORT = int(os.environ.get("PORT", 10000))
     app.run_webhook(
         listen="0.0.0.0",
