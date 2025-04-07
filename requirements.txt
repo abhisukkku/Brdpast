@@ -5,3 +5,4 @@ pymongo[srv]
 python-telegram-bot[job-queue]==20.3
 httpcore
 httpx
+motor
