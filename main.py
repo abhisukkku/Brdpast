@@ -1,26 +1,24 @@
 from telegram.ext import filters
-from motor.motor_asyncio import AsyncIOMotorClient
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    ContextTypes,
-    CallbackQueryHandler
+    ContextTypes
 )
-from telegram.error import RetryAfter, Forbidden, BadRequest
+from motor.motor_asyncio import AsyncIOMotorClient
 import os
-import pymongo
 import asyncio
 from datetime import datetime
 
-# MongoDB Setup
+# MongoDB Configuration
 MONGODB_URI = os.environ.get("MONGODB_URI")
 START_IMAGE_URL = os.environ.get("START_IMAGE_URL")
 ADMIN_ID = int(os.environ.get("ADMIN_ID"))
 LOGGER_GROUP = int(os.environ.get("LOGGER_GROUP"))
 
-client = pymongo.MongoClient(MONGODB_URI)
+# Async MongoDB Client
+client = AsyncIOMotorClient(MONGODB_URI)
 db = client["Anon"]
 chats_col = db["chats"]
 users_col = db["tgusersdb"]
@@ -42,8 +40,9 @@ def is_owner(user_id: int) -> bool:
 async def fetch_valid_targets(context):
     valid_targets = []
     
-    # Validate groups
-    async for group in chats_col.find({"chat_id": {"$lt": 0}}):
+    # Fetch and validate groups
+    groups_cursor = chats_col.find({"chat_id": {"$lt": 0}})
+    async for group in groups_cursor:
         try:
             chat = await context.bot.get_chat(group["chat_id"])
             if chat.type in ["group", "supergroup"]:
@@ -52,8 +51,9 @@ async def fetch_valid_targets(context):
             print(f"Removing invalid group {group['chat_id']}: {e}")
             await chats_col.delete_one({"_id": group["_id"]})
 
-    # Validate users
-    async for user in users_col.find({"user_id": {"$gt": 0}}):
+    # Fetch and validate users
+    users_cursor = users_col.find({"user_id": {"$gt": 0}})
+    async for user in users_cursor:
         try:
             await context.bot.get_chat(user["user_id"])
             valid_targets.append(user["user_id"])
@@ -86,7 +86,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton("Join", url="https://t.me/FinishedAnimeList"),
-            InlineKeyboardButton("Join", url="https://t.me/Hanimee_Lovers")
+            InlineKeyboardButton("Join", url="https://t.me/Hanimee_Lover")
         ]
     ])
     
@@ -111,7 +111,8 @@ async def group_join_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await send_log(context, log_msg)
     
-    if not await chats_col.find_one({"chat_id": chat.id}):
+    existing = await chats_col.find_one({"chat_id": chat.id})
+    if not existing:
         await chats_col.insert_one({
             "chat_id": chat.id,
             "title": chat.title,
@@ -164,32 +165,6 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if chat_id < 0: success_g +=1
             else: success_u +=1
-
-        except RetryAfter as e:
-            await asyncio.sleep(e.retry_after)
-            try:
-                await msg_to_broadcast.copy(chat_id=chat_id)
-                if chat_id < 0: success_g +=1
-                else: success_u +=1
-            except:
-                if chat_id < 0: failed_g +=1
-                else: failed_u +=1
-
-        except Forbidden:
-            await blocked_col.update_one(
-                {"chat_id": chat_id},
-                {"$set": {"chat_id": chat_id}},
-                upsert=True
-            )
-            if chat_id < 0: failed_g +=1
-            else: failed_u +=1
-
-        except BadRequest as e:
-            if "Chat not found" in str(e):
-                if chat_id <0: await chats_col.delete_one({"chat_id": chat_id})
-                else: await users_col.delete_one({"user_id": chat_id})
-            if chat_id <0: failed_g +=1
-            else: failed_u +=1
 
         except Exception as e:
             print(f"Error in {chat_id}: {str(e)}")
